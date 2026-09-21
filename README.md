@@ -31,6 +31,9 @@ python main.py
 #    tahoe_sawtooth.png, reno_sawtooth.png       -> individual sawtooths + loss markers
 #    tahoe_queue_delay.png, reno_queue_delay.png -> bufferbloat view (queue vs RTT)
 #    tahoe_vs_reno.png                            -> the comparison plot
+
+# 6. Launch the interactive dashboard
+streamlit run app.py
 ```
 
 Optional — turn on live AI narration instead of the offline template:
