@@ -1,18 +1,25 @@
 """
 ai_narrator.py
 ---------------
-Wraps the Anthropic API to turn the CausalDiagnosticAgent's structured
-output into plain-English narration, and to answer follow-up "why"
-questions about a specific run.
+Wraps an LLM API to turn the CausalDiagnosticAgent's structured output
+into plain-English narration, and to answer follow-up "why" questions
+about a specific run.
 
-If no ANTHROPIC_API_KEY is set (or the `anthropic` package isn't
-installed), it falls back to a template-based narrator so the rest of
-the pipeline still runs end-to-end without needing an API key. This
-matters for grading: the simulation + causal reasoning (the hard CS
-content) work with zero external dependencies; the AI layer is an
-enhancement on top.
+Provider is picked automatically, preferring whichever key is set:
+    1. GROQ_API_KEY       -> Groq (fast, generous free tier)
+    2. ANTHROPIC_API_KEY   -> Claude
 
-Setup:
+If neither is set (or the matching package isn't installed), it falls
+back to a template-based narrator so the rest of the pipeline still
+runs end-to-end without needing an API key. This matters for grading:
+the simulation + causal reasoning (the hard CS content) work with zero
+external dependencies; the AI layer is an enhancement on top.
+
+Setup (pick one):
+    pip install groq
+    export GROQ_API_KEY=gsk_...              (Linux/Mac)
+    setx GROQ_API_KEY "gsk_..."               (Windows, new terminal after)
+
     pip install anthropic
     export ANTHROPIC_API_KEY=sk-ant-...      (Linux/Mac)
     setx ANTHROPIC_API_KEY "sk-ant-..."       (Windows, new terminal after)
@@ -22,14 +29,28 @@ import os
 
 
 class AINarrator:
-    def __init__(self, model="claude-sonnet-4-6"):
-        self.model = model
-        self.api_key = os.environ.get("ANTHROPIC_API_KEY")
+    def __init__(self, model=None):
+        self.provider = None
         self.client = None
-        if self.api_key:
+
+        groq_key = os.environ.get("GROQ_API_KEY")
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+
+        if groq_key:
+            try:
+                import groq
+                self.client = groq.Groq(api_key=groq_key)
+                self.provider = "groq"
+                self.model = model or "openai/gpt-oss-120b"
+            except ImportError:
+                self.client = None
+
+        if self.client is None and anthropic_key:
             try:
                 import anthropic
-                self.client = anthropic.Anthropic(api_key=self.api_key)
+                self.client = anthropic.Anthropic(api_key=anthropic_key)
+                self.provider = "anthropic"
+                self.model = model or "claude-sonnet-4-6"
             except ImportError:
                 self.client = None
 
@@ -57,7 +78,7 @@ class AINarrator:
                 "grounded only in the data above."
             )
         return (
-            "[Offline mode: set ANTHROPIC_API_KEY to enable live AI answers.] "
+            "[Offline mode: set GROQ_API_KEY or ANTHROPIC_API_KEY to enable live AI answers.] "
             f"From the summary alone: {summary['rounds_not_good']} of {summary['total_rounds']} "
             f"rounds were NOT GOOD ({summary['loss_events']} loss events, "
             f"{summary['delay_events']} delay spikes)."
@@ -73,6 +94,13 @@ class AINarrator:
         return "\n".join(lines)
 
     def _call(self, prompt):
+        if self.provider == "groq":
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return resp.choices[0].message.content
         msg = self.client.messages.create(
             model=self.model,
             max_tokens=500,

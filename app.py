@@ -51,7 +51,7 @@ def render_cwnd_chart(tahoe_history, reno_history):
     axis.grid(alpha=0.2)
     axis.legend(frameon=False)
     figure.tight_layout()
-    st.pyplot(figure, use_container_width=True)
+    st.pyplot(figure, width="stretch")
     plt.close(figure)
 
 
@@ -69,7 +69,7 @@ def render_queue_rtt_chart(history):
     rtt_axis.set_ylabel("Seconds")
     rtt_axis.grid(alpha=0.2)
     figure.tight_layout()
-    st.pyplot(figure, use_container_width=True)
+    st.pyplot(figure, width="stretch")
     plt.close(figure)
 
 
@@ -93,7 +93,7 @@ def render_diagnostics(history, diagnoses, widget_key):
             }
             for diagnosis in diagnoses
         ]
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
         return
 
     round_number = int(selected.split()[1])
@@ -136,7 +136,7 @@ with st.sidebar:
     capacity = st.slider("Link capacity (packets / round)", 5, 60, 20)
     buffer_size = st.slider("Router buffer (packets)", 0, 60, 15)
     loss_jitter = st.slider("Random link loss", 0.0, 0.2, 0.0, 0.01)
-    run_button = st.button("Run simulation", type="primary", use_container_width=True)
+    run_button = st.button("Run simulation", type="primary", width="stretch")
 
 if run_button or "run" not in st.session_state:
     with st.spinner("Running Tahoe and Reno..."):

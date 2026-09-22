@@ -35,11 +35,18 @@ python main.py
 streamlit run app.py
 ```
 
-Optional — turn on live AI narration instead of the offline template:
+Optional — turn on live AI narration instead of the offline template.
+`ai_narrator.py` picks a provider automatically: Groq first if
+`GROQ_API_KEY` is set, else Anthropic if `ANTHROPIC_API_KEY` is set,
+else the offline template.
 ```bash
+pip install groq
+export GROQ_API_KEY=gsk_...              # get one from console.groq.com
+python main.py --interactive             # lets you ask the agent follow-up "why" questions
+
+# or, using Claude instead:
 pip install anthropic
 export ANTHROPIC_API_KEY=sk-ant-...      # get one from console.anthropic.com
-python main.py --interactive             # lets you ask the agent follow-up "why" questions
 ```
 
 Useful flags to explore the model (also useful for your report / demo):
@@ -72,9 +79,9 @@ AI narration. What's genuinely left for full marks:
   "Ask the agent" tab.)
 - [ ] **(Stretch) unit tests** — `tests/test_congestion_sim.py` asserting e.g.
   Tahoe's cwnd hits exactly 1.0 after a loss, Reno's never goes below cwnd/2, etc.
-- [ ] Fill in `ANTHROPIC_API_KEY` and confirm the *live* AI narration (not just
-  the offline template) works, since your professor will likely want to see the
-  actual LLM reasoning, not just the fallback text.
+- [ ] Fill in `GROQ_API_KEY` (or `ANTHROPIC_API_KEY`) and confirm the *live* AI
+  narration (not just the offline template) works, since your professor will
+  likely want to see the actual LLM reasoning, not just the fallback text.
 
 ## 3. Project structure
 
