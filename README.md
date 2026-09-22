@@ -13,8 +13,7 @@ Two layers, as specified:
 ## 1. How to run it (step by step)
 
 ```bash
-# 1. Open this folder in VS Code
-cd tcp_causal_project
+# 1. Open this folder (CN_project) in VS Code
 code .
 
 # 2. Create a virtual environment (recommended, avoids polluting system Python)
@@ -59,14 +58,18 @@ AI narration. What's genuinely left for full marks:
 - [ ] **Report / writeup** — screenshot the 3 plots, and for each NOT GOOD round
   the agent flags, paste its causal chain (symptom → mechanism → root cause).
   Explain in your own words why Reno's teeth sit higher than Tahoe's.
-- [ ] **Parameter sensitivity section** — run the small-buffer vs big-buffer
-  commands above, show both plots, and explicitly write up the loss-vs-delay
-  trade-off using the `_diagnose_delay` output as evidence.
+- [x] **Parameter sensitivity section** — small-buffer, big-buffer and
+  high-capacity runs are already captured under `output_smallbuffer/`,
+  `output_bigbuffer/` and `output_highcapacity/`. Write up the loss-vs-delay
+  trade-off the logs already show (e.g. Reno's health drops from 89% at
+  baseline to 68% with a big buffer, purely from delay spikes) using the
+  `_diagnose_delay` output as evidence.
 - [ ] **(Stretch) simple UI** — a Streamlit or Flask front end that lets you type
   a "why did round 7 fail?" question and shows the AI's answer live. Not required
   for the 70% milestone, but easy to bolt on with `ai_narrator.ask()` since that
   logic is already written — see `main.py --interactive` for the CLI version you
-  can lift straight into a web form.
+  can lift straight into a web form. (`app.py` already ships this as a Streamlit
+  "Ask the agent" tab.)
 - [ ] **(Stretch) unit tests** — `tests/test_congestion_sim.py` asserting e.g.
   Tahoe's cwnd hits exactly 1.0 after a loss, Reno's never goes below cwnd/2, etc.
 - [ ] Fill in `ANTHROPIC_API_KEY` and confirm the *live* AI narration (not just
@@ -76,14 +79,18 @@ AI narration. What's genuinely left for full marks:
 ## 3. Project structure
 
 ```
-tcp_causal_project/
+CN_project/
 ├── congestion_sim.py   # Layer 1: AIMD simulator (Tahoe & Reno), drop-tail queue
 ├── causal_agent.py     # Layer 2: rule-based causal diagnosis engine
 ├── ai_narrator.py       # Layer 2: Claude-powered plain-English narration + Q&A
 ├── visualize.py         # matplotlib plotting (sawtooth, comparison, queue/delay)
+├── app.py                # Streamlit interactive dashboard
 ├── main.py               # CLI entry point, orchestrates everything
 ├── requirements.txt
-└── output/               # generated plots land here
+├── output/               # baseline plots + log
+├── output_smallbuffer/   # sensitivity run: small buffer
+├── output_bigbuffer/     # sensitivity run: big buffer
+└── output_highcapacity/  # sensitivity run: high capacity
 ```
 
 ## 4. How the simulation actually works (for your report)
