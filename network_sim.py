@@ -24,6 +24,7 @@ import random
 
 from causal_agent import CausalDiagnosticAgent
 from congestion_sim import RoundRecord
+from loss_detector import evaluate, flow_estimates, forecast_overflow
 
 ENDPOINTS = ("host", "server")
 
@@ -130,6 +131,7 @@ def simulate(topology, rounds=60, seed=42):
         for lk, d in f.hops:
             queues.setdefault((lk["id"], d), 0.0)
 
+    forecast = {}  # (link id, dir) -> L_hat forecast made at the end of the previous round
     link_log = []  # per round: {"l1:ab": {"queue", "load", "dropped", "util"}}
     for r in range(1, rounds + 1):
         active = [f for f in flows if r >= f.start]
@@ -180,6 +182,9 @@ def simulate(topology, rounds=60, seed=42):
                 "queue": queues[key],
                 "load": load,
                 "dropped": noise_total(noise) + congestion,
+                "cong": congestion,
+                "noise": noise_total(noise),
+                "predicted": forecast.get(key, 0.0),
                 "util": min(1.0, (load + before) / max(cap, 1)),
             }
         link_log.append(round_links)
@@ -216,6 +221,17 @@ def simulate(topology, rounds=60, seed=42):
             )
             f.records[-1].drop_where = drop_where[f.id]
 
+        # forecast next round's overflow from the queues left behind and the new cwnds
+        forecast = {}
+        for key in queues:
+            lk = lk_by_id[key[0]]
+            offered = sum(
+                max(1, int(round(f.cwnd)))
+                for f in flows
+                if f.start <= r + 1 and any((h[0]["id"], h[1]) == key for h in f.hops)
+            )
+            forecast[key] = forecast_overflow(queues[key], offered, int(lk["capacity"]), int(lk["buffer"]))
+
     return _package(flows, link_log, links, names)
 
 
@@ -239,8 +255,14 @@ def _package(flows, link_log, links, names):
                 lid = max(rec.drop_where, key=rec.drop_where.get)
                 lk = next(l for l in links if l["id"] == lid)
                 culprit = f"{names[lk['a']]} <-> {names[lk['b']]}"
+            arriving, trace = rec.num_sent, []
+            for lk, _ in f.hops:
+                lost = rec.drop_where.get(lk["id"], 0)
+                trace.append([lk["id"], arriving, lost])
+                arriving -= lost
             rounds.append(
                 {
+                    "hops": trace,
                     "round": rec.round_num,
                     "cwnd": round(rec.cwnd, 2),
                     "ssthresh": round(rec.ssthresh, 2),
@@ -253,6 +275,7 @@ def _package(flows, link_log, links, names):
                     "issues": dg["issues"],
                 }
             )
+        flow_estimates(rounds)
         out_flows.append(
             {
                 "id": f.id,
@@ -260,6 +283,8 @@ def _package(flows, link_log, links, names):
                 "algorithm": f.algorithm,
                 "path": [names[f.src]]
                 + [names[lk["b"] if d == "ab" else lk["a"]] for lk, d in f.hops],
+                "path_nodes": [f.src]
+                + [lk["b"] if d == "ab" else lk["a"] for lk, d in f.hops],
                 "path_links": [lk["id"] for lk, _ in f.hops],
                 "bottleneck": f"{names[f.bottleneck['a']]} <-> {names[f.bottleneck['b']]}",
                 "base_rtt": round(f.base_rtt, 4),
@@ -267,7 +292,11 @@ def _package(flows, link_log, links, names):
                 "rounds": rounds,
             }
         )
-    return {"flows": out_flows, "links": link_log}
+    link_names = {}
+    for lk in links:
+        for d, (x, y) in (("ab", (lk["a"], lk["b"])), ("ba", (lk["b"], lk["a"]))):
+            link_names[f"{lk['id']}:{d}"] = f"{names[x]} -> {names[y]}"
+    return {"flows": out_flows, "links": link_log, "detection": evaluate(link_log, link_names)}
 
 
 if __name__ == "__main__":
