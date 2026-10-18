@@ -52,6 +52,10 @@
   #diag { margin-top:8px; font-size:13px; }
   #diag details { border-left:3px solid var(--bad); padding:2px 8px; margin:4px 0; background:var(--bg); }
   #diag p { margin:3px 0; }
+  table.det { border-collapse:collapse; width:100%; font-size:12px; margin:6px 0; }
+  table.det th, table.det td { border:1px solid var(--line); padding:3px 6px; text-align:right; }
+  table.det th:first-child, table.det td:first-child { text-align:left; }
+  code.f { display:block; background:var(--bg); padding:4px 8px; border-radius:6px; margin:3px 0; font-size:12px; }
   .err { color:var(--bad); font-weight:600; }
   .legend span { display:inline-block; width:10px; height:10px; border-radius:2px; margin:0 4px 0 10px; }
 </style>
@@ -93,7 +97,7 @@
     <div id="playback" style="display:none">
       <h3>Playback</h3>
       <div class="row"><button id="bPlay">&#9654;</button><input id="slider" type="range" min="1" max="60" value="1" style="flex:1"><span id="rl">1</span></div>
-      <p class="hint">Link colour = queue fill (green &rarr; red). Red burst = packet drops.</p>
+      <p class="hint">Link colour = queue fill (green &rarr; red). Dots = packets (one colour per flow); a red &#10005; is a packet dropped at that link; a dashed orange ring is the formula forecasting a drop there next.</p>
     </div>
   </aside>
 </main>
@@ -110,7 +114,7 @@ const ICON = {
 const PREFIX = {host:"PC", server:"Server", router:"Router", switch:"Switch"};
 let topo = {nodes:[], links:[], flows:[]};
 let tool = "select", sel = null, linkFrom = null, uid = 1;
-let result = null, round = 1, timer = null;
+let result = null, round = 1;
 
 const save = () => { try { localStorage.setItem("netlab", JSON.stringify({topo, uid})); } catch(e){} };
 function load() {
@@ -137,7 +141,8 @@ function linkState(l) {
   const a = rl[l.id + ":ab"], b = rl[l.id + ":ba"];
   if (!a && !b) return {queue:0, dropped:0, used:false};
   const q = Math.max(a ? a.queue : 0, b ? b.queue : 0);
-  return {queue:q, dropped:(a?a.dropped:0)+(b?b.dropped:0), used:true};
+  return {queue:q, dropped:(a?a.dropped:0)+(b?b.dropped:0), used:true,
+          predicted:Math.max(a?a.predicted:0, b?b.predicted:0)};
 }
 function draw() {
   const svg = $("canvas");
@@ -152,6 +157,11 @@ function draw() {
     const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
     const t = el("text", {x:mx, y:my-7, class:"linklabel"}, gl);
     t.textContent = `${l.capacity} pkt/r · buf ${l.buffer} · ${l.delay}ms` + (l.loss ? ` · ${(l.loss*100).toFixed(1)}%` : "");
+    if (st && st.predicted >= 0.5 && st.dropped === 0) {
+      el("circle", {cx:mx, cy:my, r:12, fill:"none", stroke:"#f4a261", "stroke-width":2.5, "stroke-dasharray":"4 3"}, gp);
+      const w = el("text", {x:mx, y:my+4, class:"linklabel", style:"fill:#f4a261;font-weight:700"}, gp);
+      w.textContent = "~" + Math.round(st.predicted);
+    }
     if (st && st.dropped > 0) {
       el("circle", {cx:mx, cy:my, r:10 + st.dropped, fill:"rgba(230,57,70,.35)", stroke:"#e63946"}, gp);
       const d = el("text", {x:mx, y:my+4, class:"linklabel", style:"fill:#e63946;font-weight:700"}, gp);
@@ -349,7 +359,7 @@ $("bRun").onclick = async () => {
       body:JSON.stringify({topology:topo, rounds:+$("rounds").value || 60})});
     const j = await r.json();
     if (!r.ok) { box.innerHTML = `<span class="err">${j.error}</span>`; return; }
-    result = j; showResults();
+    result = j; showResults(); startAnim();
   } catch (e) { box.innerHTML = `<span class="err">Could not reach the server (${e.message}). Start it with: python topology_app.py</span>`; }
 };
 const COLORS = ["#e76f51","#2a9d8f","#1f6feb","#9b5de5","#f4a261","#43aa8b"];
@@ -367,6 +377,13 @@ function showResults() {
   h += '</div><div class="charts"><div><b>Congestion window (cwnd)</b><svg id="cw"></svg></div><div><b>Round-trip time (s)</b><svg id="rt"></svg></div></div>';
   h += '<div class="legend">' + result.flows.map((f,i)=>`<span style="background:${COLORS[i%6]}"></span>${f.label}`).join("") + "</div>";
   h += '<div id="diag"><b>Why rounds went wrong</b> <span class="hint">(causal agent, click to expand)</span></div>';
+  const D = result.detection, pc = v => v === null ? "–" : (v*100).toFixed(0) + "%";
+  h += `<div id="det"><b>Loss detection</b> <span class="hint">(forecast one round ahead, then check against what really happened)</span>
+    <code class="f">${D.formulas.forecast}</code><code class="f">${D.formulas.classify}</code>
+    <code class="f">${D.formulas.ewma}</code><code class="f">${D.formulas.mathis}</code>
+    <table class="det"><tr><th>Link</th><th>Forecast hits</th><th>False alarms</th><th>Missed</th><th>Precision</th><th>Recall</th><th>Congestion drops</th><th>Random drops</th></tr>` +
+    D.links.map(l => `<tr><td>${l.name}</td><td>${l.tp}</td><td>${l.fp}</td><td>${l.fn}</td><td>${pc(l.precision)}</td><td>${pc(l.recall)}</td><td>${l.congestion_drops}</td><td>${l.random_drops}</td></tr>`).join("") +
+    `</table><div class="hint">Per-flow estimates (loss EWMA, Mathis window) at the selected round are shown below the playback slider.</div><div id="est"></div></div>`;
   box.innerHTML = h;
   chart($("cw"), f => f.rounds.map(r => r.cwnd), total);
   chart($("rt"), f => f.rounds.map(r => r.rtt), total);
@@ -380,6 +397,7 @@ function showResults() {
       dg.append(d);
     });
   });
+  showEst();
   draw();
 }
 function chart(svg, getY, total) {
@@ -404,21 +422,77 @@ function chart(svg, getY, total) {
   const cur = P + (W-P-8) * (round-1) / Math.max(1, total-1);
   el("line", {x1:cur, x2:cur, y1:6, y2:H-P, stroke:"#1f6feb", "stroke-dasharray":"3 3"}, svg).setAttribute("class","cursor");
 }
+/* ---------- packet animation ---------- */
+const PERIOD = 1600;
+let t0 = 0, lastCycle = 0, playing = false, raf = null;
+function packetFrame(now) {
+  raf = requestAnimationFrame(packetFrame);
+  if (!result) return;
+  const cycle = Math.floor((now - t0) / PERIOD), phase = ((now - t0) % PERIOD) / PERIOD;
+  if (cycle !== lastCycle) {
+    lastCycle = cycle;
+    if (playing) { if (round >= result.links.length) { stopPlay(); } else { setRound(round + 1); return; } }
+  }
+  let g = document.getElementById("pk");
+  if (!g) g = el("g", {id:"pk"}, $("canvas"));
+  g.innerHTML = "";
+  result.flows.forEach((f, fi) => {
+    const rd = f.rounds[round - f.rounds[0].round];
+    if (!rd) return;
+    const pts = f.path_nodes.map(nodeById);
+    if (pts.some(p => !p)) return;
+    const H = pts.length - 1, N = Math.min(rd.sent, 12), lane = (fi - (result.flows.length-1)/2) * 6;
+    for (let k = 0; k < N; k++) {
+      let death = null;                     // hop index where this packet is lost
+      for (let h = 0; h < H; h++) {
+        const surv = rd.hops[h][1] - rd.hops[h][2];
+        if (k >= Math.round(surv * N / rd.sent)) { death = h; break; }
+      }
+      const u = Math.max(0, Math.min(1, phase * 1.5 - (k / N) * 0.5));
+      if (u <= 0) continue;
+      let pos = u * H, dead = false;
+      if (death !== null && pos >= death + 0.5) { pos = death + 0.5; dead = true; }
+      const h = Math.min(H - 1, Math.floor(pos)), t = pos - h;
+      const a = pts[h], b = pts[h + 1], dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+      const x = a.x + dx * t - dy / len * lane, y = a.y + dy * t + dx / len * lane;
+      if (dead) {
+        const fade = Math.max(0, 1 - (phase * 1.5 - 0.5 - (k / N) * 0.5 - (death + 0.5) / H) * 4);
+        const c = el("text", {x, y:y+5, "text-anchor":"middle", "font-size":16, "font-weight":700, fill:"#e63946", opacity:Math.min(1, fade)}, g);
+        c.textContent = "✕";
+      } else {
+        el("circle", {cx:x, cy:y, r:4, fill:COLORS[fi % 6], stroke:"#fff", "stroke-width":1}, g);
+      }
+    }
+  });
+}
+function startAnim() { t0 = performance.now(); lastCycle = 0; if (!raf) raf = requestAnimationFrame(packetFrame); }
+function showEst() {
+  const box = $("est"); if (!box || !result) return;
+  box.innerHTML = result.flows.map((f, i) => {
+    const rd = f.rounds[round - f.rounds[0].round];
+    if (!rd) return `<div class="hint">${f.label}: not started yet</div>`;
+    const ev = (result.detection.rounds[round-1] || []).filter(e => e.verdict !== "ok").map(e => e.verdict).join("; ");
+    return `<div style="border-left:4px solid ${COLORS[i%6]};padding-left:6px;margin:3px 0"><b>${f.label}</b> — round ${round}: cwnd ${rd.cwnd}, p̂ = ${rd.loss_ewma}, Mathis cwnd* = ${rd.mathis_cwnd ?? "n/a (no loss yet)"}${rd.dropped ? `, <span class="err">${rd.dropped} lost${rd.drop_link ? " at " + rd.drop_link : ""}</span>` : ""}</div>`;
+  }).join("") + (() => { const ev = (result.detection.rounds[round-1] || []); return ev.length ? `<div class="hint">Detector this round: ` + ev.map(e => `${e.link.split(":")[0]}: predicted ${e.predicted} → ${e.verdict}`).join("; ") + `</div>` : ""; })();
+}
 function setRound(r) {
+  t0 = performance.now(); lastCycle = 0;
   round = r; $("slider").value = r; $("rl").textContent = r;
+  showEst();
   document.querySelectorAll(".cursor").forEach(c => {
     const W = c.ownerSVGElement.clientWidth, x = 28 + (W-36) * (r-1) / Math.max(1, result.links.length-1);
     c.setAttribute("x1", x); c.setAttribute("x2", x);
   });
   draw();
 }
-$("slider").oninput = e => { stop(); setRound(+e.target.value); };
-function stop() { if (timer) clearInterval(timer); timer = null; $("bPlay").innerHTML = "&#9654;"; }
+$("slider").oninput = e => { stopPlay(); setRound(+e.target.value); };
+function stopPlay() { playing = false; $("bPlay").innerHTML = "&#9654;"; }
+const stop = stopPlay;
 $("bPlay").onclick = () => {
-  if (timer) return stop();
+  if (playing) return stopPlay();
   if (round >= result.links.length) setRound(1);
+  playing = true; t0 = performance.now(); lastCycle = 0;
   $("bPlay").innerHTML = "&#10074;&#10074;";
-  timer = setInterval(() => { if (round >= result.links.length) return stop(); setRound(round + 1); }, 350);
 };
 
 if (!load() || !topo.nodes.length) sample(); else draw();

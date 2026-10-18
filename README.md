@@ -147,3 +147,16 @@ python topology_app.py          # open http://127.0.0.1:5000
 - Links light up green→red with queue fill during playback; red bursts are drops.
 - The existing causal agent explains every NOT GOOD round per flow.
 - Topologies can be saved/loaded as JSON; the editor autosaves in the browser.
+
+### Packet visualization and loss detection
+
+- **Packets on the wire:** during playback each flow's packets are drawn as
+  coloured dots moving hop-by-hop along its path; a red ✕ marks a packet
+  dropped at that link.
+- **Loss detection (`loss_detector.py`):** every round the detector forecasts
+  next round's drops per link with the drop-tail overflow formula
+  `L̂(t+1) = max(0, Q(t) + A(t+1) − C − B)` (Q queue, A offered load, C capacity,
+  B buffer), then scores itself (precision/recall) against what actually
+  happened. Drops the formula can't explain are classed as *random link loss*.
+  Sender side, it tracks `p(t) = α·lost/sent + (1−α)·p(t−1)` and the Mathis
+  window `cwnd* = 1.22/√p`.
