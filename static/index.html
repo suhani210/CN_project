@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network Lab</title>
+<style>
+  :root {
+    --bg:#f4f6f8; --panel:#fff; --ink:#1d2733; --muted:#66727f; --line:#d5dbe1;
+    --accent:#1f6feb; --good:#2a9d8f; --bad:#e63946; --warn:#f4a261;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12171c; --panel:#1b222a; --ink:#e6ebf0; --muted:#8c98a5; --line:#2e3944; --accent:#58a6ff; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.4 system-ui,Segoe UI,sans-serif; background:var(--bg); color:var(--ink); height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; gap:8px; align-items:center; padding:8px 14px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 10px 0 0; }
+  button, select, input { font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 9px; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.run { background:var(--good); color:#fff; border-color:var(--good); font-weight:600; }
+  main { flex:1; display:grid; grid-template-columns:150px minmax(0,1fr) 300px; grid-template-rows:minmax(0,1fr); min-height:0; }
+  aside { background:var(--panel); padding:10px; overflow:auto; }
+  #palette { border-right:1px solid var(--line); }
+  #side { border-left:1px solid var(--line); }
+  .pal { display:flex; flex-direction:column; align-items:center; padding:8px; margin-bottom:8px; border:1px dashed var(--line); border-radius:8px; cursor:grab; user-select:none; }
+  .pal:active { cursor:grabbing; }
+  .pal span { font-size:12px; color:var(--muted); }
+  #stage { position:relative; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+  #canvas { flex:1 1 0; width:100%; min-height:200px; background:var(--bg);
+    background-image:radial-gradient(var(--line) 1px, transparent 1px); background-size:22px 22px; }
+  .node text { font-size:12px; fill:var(--ink); text-anchor:middle; pointer-events:none; }
+  .node.sel .body { stroke:var(--accent); stroke-width:3; }
+  .link { stroke:var(--muted); stroke-width:3; }
+  .link.sel { stroke:var(--accent); }
+  .linklabel { font-size:11px; fill:var(--muted); text-anchor:middle; pointer-events:none; }
+  h3 { margin:14px 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  label.f { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:4px 0; }
+  label.f input, label.f select { width:130px; }
+  .flow { border:1px solid var(--line); border-radius:8px; padding:6px; margin-bottom:6px; }
+  .flow select { width:100%; margin:2px 0; }
+  .row { display:flex; gap:4px; }
+  .hint { color:var(--muted); font-size:12px; }
+  #results { flex:0 0 auto; border-top:1px solid var(--line); background:var(--panel); max-height:46%; overflow:auto; padding:10px 14px; display:none; }
+  .cards { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+  .card { border:1px solid var(--line); border-radius:8px; padding:6px 10px; min-width:170px; }
+  .card b { display:block; } .card .pct { font-size:20px; font-weight:700; }
+  .charts { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .charts svg { width:100%; height:170px; background:var(--bg); border-radius:8px; }
+  #diag { margin-top:8px; font-size:13px; }
+  #diag details { border-left:3px solid var(--bad); padding:2px 8px; margin:4px 0; background:var(--bg); }
+  #diag p { margin:3px 0; }
+  .err { color:var(--bad); font-weight:600; }
+  .legend span { display:inline-block; width:10px; height:10px; border-radius:2px; margin:0 4px 0 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Network Lab</h1>
+  <button id="tSelect" class="on" title="Select / move devices">Select</button>
+  <button id="tLink" title="Click two devices to connect them">Connect</button>
+  <button id="tDelete" title="Click a device or link to delete it">Delete</button>
+  <span style="flex:1"></span>
+  <button id="bSample">Sample topology</button>
+  <button id="bClear">Clear</button>
+  <button id="bSave">Save</button>
+  <button id="bLoad">Load</button>
+  <input type="file" id="fLoad" accept=".json" hidden>
+  <label>Rounds <input id="rounds" type="number" value="60" min="5" max="500" style="width:70px"></label>
+  <button id="bRun" class="run">&#9654; Run on this network</button>
+</header>
+<main>
+  <aside id="palette">
+    <h3 style="margin-top:0">Devices</h3>
+    <div class="pal" draggable="true" data-type="host"><svg width="48" height="40" viewBox="0 0 48 40"><rect x="6" y="3" width="36" height="25" rx="3" fill="#6c8ebf" stroke="#34495e"/><rect x="16" y="31" width="16" height="4" fill="#34495e"/></svg><span>PC / Host</span></div>
+    <div class="pal" draggable="true" data-type="server"><svg width="48" height="40" viewBox="0 0 48 40"><rect x="10" y="2" width="28" height="9" rx="2" fill="#82b366" stroke="#34495e"/><rect x="10" y="13" width="28" height="9" rx="2" fill="#82b366" stroke="#34495e"/><rect x="10" y="24" width="28" height="9" rx="2" fill="#82b366" stroke="#34495e"/></svg><span>Server</span></div>
+    <div class="pal" draggable="true" data-type="router"><svg width="48" height="40" viewBox="0 0 48 40"><circle cx="24" cy="20" r="17" fill="#d79b00" stroke="#34495e"/><path d="M12 20h24M24 8v24" stroke="#fff" stroke-width="3"/></svg><span>Router</span></div>
+    <div class="pal" draggable="true" data-type="switch"><svg width="48" height="40" viewBox="0 0 48 40"><rect x="3" y="9" width="42" height="22" rx="3" fill="#9673a6" stroke="#34495e"/><path d="M10 20h28" stroke="#fff" stroke-width="3"/></svg><span>Switch</span></div>
+    <p class="hint">Pick up a device and drop it on the canvas. Use <b>Connect</b> to wire two devices together.</p>
+  </aside>
+  <section id="stage">
+    <svg id="canvas"></svg>
+    <div id="results"></div>
+  </section>
+  <aside id="side">
+    <div id="props"><p class="hint">Select a device or link to edit it.</p></div>
+    <h3>Traffic flows</h3>
+    <div id="flows"></div>
+    <button id="bAddFlow">+ Add flow</button>
+    <p class="hint">Each flow sends from a host/server to another using TCP Tahoe or Reno. Flows that share a link compete for it.</p>
+    <div id="playback" style="display:none">
+      <h3>Playback</h3>
+      <div class="row"><button id="bPlay">&#9654;</button><input id="slider" type="range" min="1" max="60" value="1" style="flex:1"><span id="rl">1</span></div>
+      <p class="hint">Link colour = queue fill (green &rarr; red). Red burst = packet drops.</p>
+    </div>
+  </aside>
+</main>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+const ICON = {
+  host:   '<rect x="-18" y="-17" width="36" height="25" rx="3" fill="#6c8ebf" stroke="#34495e" class="body"/><rect x="-8" y="11" width="16" height="4" fill="#34495e"/>',
+  server: '<rect x="-14" y="-18" width="28" height="9" rx="2" fill="#82b366" stroke="#34495e" class="body"/><rect x="-14" y="-7" width="28" height="9" rx="2" fill="#82b366" stroke="#34495e"/><rect x="-14" y="4" width="28" height="9" rx="2" fill="#82b366" stroke="#34495e"/>',
+  router: '<circle r="19" fill="#d79b00" stroke="#34495e" class="body"/><path d="M-12 0h24M0-12v24" stroke="#fff" stroke-width="3"/>',
+  switch: '<rect x="-21" y="-11" width="42" height="22" rx="3" fill="#9673a6" stroke="#34495e" class="body"/><path d="M-14 0h28" stroke="#fff" stroke-width="3"/>',
+};
+const PREFIX = {host:"PC", server:"Server", router:"Router", switch:"Switch"};
+let topo = {nodes:[], links:[], flows:[]};
+let tool = "select", sel = null, linkFrom = null, uid = 1;
+let result = null, round = 1, timer = null;
+
+const save = () => { try { localStorage.setItem("netlab", JSON.stringify({topo, uid})); } catch(e){} };
+function load() {
+  try { const s = JSON.parse(localStorage.getItem("netlab")); if (s) { topo = s.topo; uid = s.uid; return true; } } catch(e){}
+  return false;
+}
+const nid = () => "n" + (uid++), lid = () => "l" + (uid++), fid = () => "f" + (uid++);
+const nodeById = id => topo.nodes.find(n => n.id === id);
+
+/* ---------- drawing ---------- */
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function queueColor(f) { // 0 = green, 1 = red
+  const h = 140 - 140 * Math.min(1, f);
+  return `hsl(${h} 70% 45%)`;
+}
+function linkState(l) {
+  if (!result || !result.links[round-1]) return null;
+  const rl = result.links[round-1];
+  const a = rl[l.id + ":ab"], b = rl[l.id + ":ba"];
+  if (!a && !b) return {queue:0, dropped:0, used:false};
+  const q = Math.max(a ? a.queue : 0, b ? b.queue : 0);
+  return {queue:q, dropped:(a?a.dropped:0)+(b?b.dropped:0), used:true};
+}
+function draw() {
+  const svg = $("canvas");
+  svg.innerHTML = "";
+  const gl = el("g", {}, svg), gn = el("g", {}, svg), gp = el("g", {}, svg);
+  for (const l of topo.links) {
+    const a = nodeById(l.a), b = nodeById(l.b);
+    const st = linkState(l);
+    const ln = el("line", {x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"link" + (sel && sel.id===l.id ? " sel":""),
+      "data-id":l.id}, gl);
+    if (st && st.used) { ln.style.stroke = queueColor(st.queue / Math.max(1, l.buffer)); ln.style.strokeWidth = 4 + Math.min(6, st.queue/Math.max(1,l.buffer)*6); }
+    const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+    const t = el("text", {x:mx, y:my-7, class:"linklabel"}, gl);
+    t.textContent = `${l.capacity} pkt/r · buf ${l.buffer} · ${l.delay}ms` + (l.loss ? ` · ${(l.loss*100).toFixed(1)}%` : "");
+    if (st && st.dropped > 0) {
+      el("circle", {cx:mx, cy:my, r:10 + st.dropped, fill:"rgba(230,57,70,.35)", stroke:"#e63946"}, gp);
+      const d = el("text", {x:mx, y:my+4, class:"linklabel", style:"fill:#e63946;font-weight:700"}, gp);
+      d.textContent = "-" + st.dropped;
+    }
+  }
+  for (const n of topo.nodes) {
+    const g = el("g", {class:"node" + (sel && sel.id===n.id ? " sel":"") + (linkFrom===n.id ? " sel":""),
+      transform:`translate(${n.x},${n.y})`, "data-id":n.id}, gn);
+    g.innerHTML = ICON[n.type] + `<text y="34">${n.name.replace(/</g,"&lt;")}</text>`;
+    g.style.cursor = tool === "select" ? "move" : "pointer";
+  }
+  renderProps(); renderFlows();
+}
+
+/* ---------- drag & drop from palette ---------- */
+document.querySelectorAll(".pal").forEach(p => p.addEventListener("dragstart", e => {
+  e.dataTransfer.setData("text/plain", p.dataset.type);
+}));
+const canvas = $("canvas");
+canvas.addEventListener("dragover", e => e.preventDefault());
+canvas.addEventListener("drop", e => {
+  e.preventDefault();
+  const type = e.dataTransfer.getData("text/plain");
+  if (!ICON[type]) return;
+  const p = pt(e);
+  const count = topo.nodes.filter(n => n.type === type).length + 1;
+  const n = {id:nid(), type, name:`${PREFIX[type]}${count}`, x:p.x, y:p.y};
+  topo.nodes.push(n); sel = n; save(); draw();
+});
+function pt(e) {
+  const r = canvas.getBoundingClientRect();
+  return {x:Math.round(e.clientX - r.left), y:Math.round(e.clientY - r.top)};
+}
+
+/* ---------- pick up / move / connect / delete ---------- */
+let drag = null;
+canvas.addEventListener("pointerdown", e => {
+  const g = e.target.closest(".node"), ln = e.target.closest(".link");
+  if (tool === "delete") {
+    if (g) removeNode(g.dataset.id); else if (ln) removeLink(ln.dataset.id);
+    return;
+  }
+  if (tool === "link") {
+    if (!g) { linkFrom = null; draw(); return; }
+    const id = g.dataset.id;
+    if (!linkFrom) linkFrom = id;
+    else if (linkFrom !== id) {
+      const dup = topo.links.some(l => (l.a===linkFrom&&l.b===id)||(l.a===id&&l.b===linkFrom));
+      if (!dup) { const l = {id:lid(), a:linkFrom, b:id, capacity:20, buffer:15, delay:10, loss:0}; topo.links.push(l); sel = l; }
+      linkFrom = null;
+    }
+    save(); draw(); return;
+  }
+  if (g) {
+    const n = nodeById(g.dataset.id); sel = n;
+    const p = pt(e); drag = {n, dx:n.x-p.x, dy:n.y-p.y};
+    canvas.setPointerCapture(e.pointerId);
+  } else if (ln) sel = topo.links.find(l => l.id === ln.dataset.id);
+  else sel = null;
+  draw();
+});
+canvas.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const p = pt(e), r = canvas.getBoundingClientRect();
+  drag.n.x = Math.max(25, Math.min(r.width-25, p.x + drag.dx));
+  drag.n.y = Math.max(25, Math.min(r.height-30, p.y + drag.dy));
+  draw();
+});
+canvas.addEventListener("pointerup", () => { if (drag) { drag = null; save(); } });
+function removeNode(id) {
+  topo.nodes = topo.nodes.filter(n => n.id !== id);
+  topo.links = topo.links.filter(l => l.a !== id && l.b !== id);
+  topo.flows = topo.flows.filter(f => f.src !== id && f.dst !== id);
+  sel = null; clearResult(); save(); draw();
+}
+function removeLink(id) { topo.links = topo.links.filter(l => l.id !== id); sel = null; clearResult(); save(); draw(); }
+window.addEventListener("keydown", e => {
+  if (e.key === "Delete" && sel && !/INPUT|SELECT/.test(document.activeElement.tagName))
+    topo.nodes.includes(sel) ? removeNode(sel.id) : removeLink(sel.id);
+});
+
+function setTool(t) {
+  tool = t; linkFrom = null;
+  $("tSelect").classList.toggle("on", t==="select");
+  $("tLink").classList.toggle("on", t==="link");
+  $("tDelete").classList.toggle("on", t==="delete");
+  draw();
+}
+$("tSelect").onclick = () => setTool("select");
+$("tLink").onclick = () => setTool("link");
+$("tDelete").onclick = () => setTool("delete");
+
+/* ---------- property panel ---------- */
+function field(label, input) { const l = document.createElement("label"); l.className = "f"; l.append(label, input); return l; }
+function numInput(obj, key, min, max, step) {
+  const i = document.createElement("input"); i.type = "number"; i.value = obj[key]; i.min = min; i.max = max; i.step = step || 1;
+  i.onchange = () => { obj[key] = Math.max(min, Math.min(max, +i.value || 0)); i.value = obj[key]; clearResult(); save(); draw(); };
+  return i;
+}
+function renderProps() {
+  const box = $("props"); box.innerHTML = "";
+  if (!sel) { box.innerHTML = '<p class="hint">Select a device or link to edit it.</p>'; return; }
+  if (topo.nodes.includes(sel)) {
+    box.innerHTML = `<h3 style="margin-top:0">${sel.type}</h3>`;
+    const i = document.createElement("input"); i.value = sel.name;
+    i.oninput = () => { sel.name = i.value || sel.type; save(); drawKeepFocus(); };
+    box.append(field("Name", i));
+  } else {
+    const a = nodeById(sel.a), b = nodeById(sel.b);
+    box.innerHTML = `<h3 style="margin-top:0">Link ${a.name} &harr; ${b.name}</h3>`;
+    box.append(field("Capacity (pkt/round)", numInput(sel, "capacity", 1, 1000)),
+               field("Buffer (pkts)", numInput(sel, "buffer", 0, 1000)),
+               field("Delay (ms, one-way)", numInput(sel, "delay", 1, 2000)),
+               field("Random loss (0-1)", numInput(sel, "loss", 0, 1, 0.01)));
+    const h = document.createElement("p"); h.className = "hint";
+    h.textContent = "The narrowest link on a flow's path becomes its bottleneck."; box.append(h);
+  }
+}
+function drawKeepFocus() { // re-render canvas only, keep the name input focused
+  const keep = $("props").innerHTML; const sv = $("canvas"); const was = document.activeElement;
+  draw(); const inp = $("props").querySelector("input"); if (inp && was && was.tagName==="INPUT") { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+}
+
+/* ---------- flows ---------- */
+function endpoints() { return topo.nodes.filter(n => n.type==="host" || n.type==="server"); }
+function renderFlows() {
+  const box = $("flows"); box.innerHTML = "";
+  const eps = endpoints();
+  topo.flows.forEach(f => {
+    const d = document.createElement("div"); d.className = "flow";
+    const opts = eps.map(n => `<option value="${n.id}">${n.name}</option>`).join("");
+    d.innerHTML = `<div class="row"><select class="s">${opts}</select><select class="d">${opts}</select></div>
+      <div class="row"><select class="a"><option value="reno">Reno</option><option value="tahoe">Tahoe</option></select>
+      <input class="st" type="number" min="1" value="${f.start}" title="Start round" style="width:60px">
+      <button class="x">&times;</button></div>`;
+    d.querySelector(".s").value = f.src; d.querySelector(".d").value = f.dst; d.querySelector(".a").value = f.algorithm;
+    d.querySelector(".s").onchange = e => { f.src = e.target.value; clearResult(); save(); };
+    d.querySelector(".d").onchange = e => { f.dst = e.target.value; clearResult(); save(); };
+    d.querySelector(".a").onchange = e => { f.algorithm = e.target.value; clearResult(); save(); };
+    d.querySelector(".st").onchange = e => { f.start = Math.max(1, +e.target.value||1); clearResult(); save(); };
+    d.querySelector(".x").onclick = () => { topo.flows = topo.flows.filter(x => x !== f); clearResult(); save(); renderFlows(); };
+    box.append(d);
+  });
+}
+$("bAddFlow").onclick = () => {
+  const eps = endpoints();
+  if (eps.length < 2) return alert("Add at least two hosts/servers first.");
+  const dst = eps.find(n => n.type==="server") || eps[1];
+  const src = eps.find(n => n.id !== dst.id);
+  topo.flows.push({id:fid(), src:src.id, dst:dst.id, algorithm:"reno", start:1});
+  clearResult(); save(); renderFlows();
+};
+
+/* ---------- toolbar actions ---------- */
+function sample() {
+  uid = 1; const N = (type, name, x, y) => ({id:nid(), type, name, x, y});
+  const pc1 = N("host","PC1",90,90), pc2 = N("host","PC2",90,250), pc3 = N("host","PC3",90,410);
+  const sw = N("switch","Switch1",250,250), r1 = N("router","Router1",430,250), r2 = N("router","Router2",610,250);
+  const srv = N("server","WebServer",780,250);
+  topo = {nodes:[pc1,pc2,pc3,sw,r1,r2,srv], links:[], flows:[]};
+  const L = (a,b,c,bf,d) => topo.links.push({id:lid(), a:a.id, b:b.id, capacity:c, buffer:bf, delay:d, loss:0});
+  L(pc1,sw,40,30,2); L(pc2,sw,40,30,2); L(pc3,sw,40,30,2);
+  L(sw,r1,60,30,3); L(r1,r2,24,12,20); L(r2,srv,60,30,3);
+  const F = (s,a,start) => topo.flows.push({id:fid(), src:s.id, dst:srv.id, algorithm:a, start});
+  F(pc1,"reno",1); F(pc2,"tahoe",1); F(pc3,"reno",15);
+  sel = null; clearResult(); save(); draw();
+}
+$("bSample").onclick = sample;
+$("bClear").onclick = () => { if (!topo.nodes.length || confirm("Clear the whole topology?")) { topo = {nodes:[],links:[],flows:[]}; sel=null; clearResult(); save(); draw(); } };
+$("bSave").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(topo, null, 2)], {type:"application/json"}));
+  a.download = "topology.json"; a.click();
+};
+$("bLoad").onclick = () => $("fLoad").click();
+$("fLoad").onchange = async e => {
+  try {
+    const t = JSON.parse(await e.target.files[0].text());
+    if (!Array.isArray(t.nodes) || !Array.isArray(t.links)) throw 0;
+    t.flows = t.flows || [];
+    uid = 1 + Math.max(0, ...[...t.nodes,...t.links,...t.flows].map(x => parseInt(String(x.id).slice(1)) || 0));
+    topo = t; sel = null; clearResult(); save(); draw();
+  } catch { alert("That file is not a valid topology."); }
+  e.target.value = "";
+};
+
+/* ---------- run + results ---------- */
+function clearResult() { result = null; stop(); $("results").style.display = "none"; $("playback").style.display = "none"; }
+$("bRun").onclick = async () => {
+  const box = $("results");
+  box.style.display = "block"; box.innerHTML = "Simulating…";
+  try {
+    const r = await fetch("/api/simulate", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({topology:topo, rounds:+$("rounds").value || 60})});
+    const j = await r.json();
+    if (!r.ok) { box.innerHTML = `<span class="err">${j.error}</span>`; return; }
+    result = j; showResults();
+  } catch (e) { box.innerHTML = `<span class="err">Could not reach the server (${e.message}). Start it with: python topology_app.py</span>`; }
+};
+const COLORS = ["#e76f51","#2a9d8f","#1f6feb","#9b5de5","#f4a261","#43aa8b"];
+function showResults() {
+  const box = $("results"); box.innerHTML = "";
+  const n = result.flows[0].rounds.length + result.flows[0].rounds[0].round - 1;
+  const total = result.links.length;
+  $("slider").max = total; $("slider").value = round = 1; $("rl").textContent = 1; $("playback").style.display = "block";
+  let h = '<div class="cards">';
+  result.flows.forEach((f, i) => {
+    h += `<div class="card" style="border-left:4px solid ${COLORS[i%6]}"><b>${f.label}</b>
+      <span class="pct">${f.summary.health_pct}%</span> healthy<br>
+      <span class="hint">${f.path.join(" → ")}<br>bottleneck: ${f.bottleneck}<br>${f.summary.loss_events} loss · ${f.summary.delay_events} delay rounds</span></div>`;
+  });
+  h += '</div><div class="charts"><div><b>Congestion window (cwnd)</b><svg id="cw"></svg></div><div><b>Round-trip time (s)</b><svg id="rt"></svg></div></div>';
+  h += '<div class="legend">' + result.flows.map((f,i)=>`<span style="background:${COLORS[i%6]}"></span>${f.label}`).join("") + "</div>";
+  h += '<div id="diag"><b>Why rounds went wrong</b> <span class="hint">(causal agent, click to expand)</span></div>';
+  box.innerHTML = h;
+  chart($("cw"), f => f.rounds.map(r => r.cwnd), total);
+  chart($("rt"), f => f.rounds.map(r => r.rtt), total);
+  const dg = $("diag");
+  result.flows.forEach(f => {
+    f.rounds.filter(r => r.status === "NOT GOOD").slice(0, 12).forEach(r => {
+      const d = document.createElement("details");
+      d.innerHTML = `<summary>${f.label} — round ${r.round}${r.drop_link ? " — drops at " + r.drop_link : ""}</summary>` +
+        r.issues.map(i => `<p><b>Symptom:</b> ${i.symptom}</p><p><b>Mechanism:</b> ${i.mechanism}</p><p><b>${i.root_cause}</b></p>` +
+          (i.algorithm_response ? `<p>${i.algorithm_response}</p>` : "") + (i.tradeoff ? `<p>${i.tradeoff}</p>` : "")).join("");
+      dg.append(d);
+    });
+  });
+  draw();
+}
+function chart(svg, getY, total) {
+  const W = svg.clientWidth || 400, H = 170, P = 28;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const series = result.flows.map(getY);
+  const max = Math.max(...series.flat(), 1);
+  for (let i = 0; i <= 4; i++) {
+    const y = P/2 + (H-P-P/2) * i/4;
+    el("line", {x1:P, x2:W-6, y1:y, y2:y, stroke:"currentColor", "stroke-opacity":.12}, svg);
+    const t = el("text", {x:P-4, y:y+3, "text-anchor":"end", "font-size":9, fill:"currentColor"}, svg);
+    t.textContent = +(max*(1-i/4)).toFixed(2);
+  }
+  result.flows.forEach((f, i) => {
+    const pts = f.rounds.map((r, k) => {
+      const x = P + (W-P-8) * (r.round-1) / Math.max(1, total-1);
+      return `${x},${P/2 + (H-P-P/2) * (1 - series[i][k]/max)}`;
+    });
+    el("polyline", {points:pts.join(" "), fill:"none", stroke:COLORS[i%6], "stroke-width":2}, svg);
+  });
+  const xl = el("text", {x:W/2, y:H-4, "text-anchor":"middle", "font-size":9, fill:"currentColor"}, svg); xl.textContent = "round";
+  const cur = P + (W-P-8) * (round-1) / Math.max(1, total-1);
+  el("line", {x1:cur, x2:cur, y1:6, y2:H-P, stroke:"#1f6feb", "stroke-dasharray":"3 3"}, svg).setAttribute("class","cursor");
+}
+function setRound(r) {
+  round = r; $("slider").value = r; $("rl").textContent = r;
+  document.querySelectorAll(".cursor").forEach(c => {
+    const W = c.ownerSVGElement.clientWidth, x = 28 + (W-36) * (r-1) / Math.max(1, result.links.length-1);
+    c.setAttribute("x1", x); c.setAttribute("x2", x);
+  });
+  draw();
+}
+$("slider").oninput = e => { stop(); setRound(+e.target.value); };
+function stop() { if (timer) clearInterval(timer); timer = null; $("bPlay").innerHTML = "&#9654;"; }
+$("bPlay").onclick = () => {
+  if (timer) return stop();
+  if (round >= result.links.length) setRound(1);
+  $("bPlay").innerHTML = "&#10074;&#10074;";
+  timer = setInterval(() => { if (round >= result.links.length) return stop(); setRound(round + 1); }, 350);
+};
+
+if (!load() || !topo.nodes.length) sample(); else draw();
+window.addEventListener("resize", () => { if (result) showResults(); });
+</script>
+</body>
+</html>

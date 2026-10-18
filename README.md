@@ -129,3 +129,21 @@ plus (for loss) how the algorithm responds, and (for delay) an explicit
 statement of the buffer-size trade-off. See `causal_agent.py`'s
 `_diagnose_loss` / `_diagnose_delay` for the exact logic — it's short and
 readable, good to walk through live in a demo.
+
+## 3. Network Lab — build a topology, then simulate on it
+
+A Packet Tracer–style editor. Pick up devices (PC, server, router, switch) from
+the palette, drop them on the canvas, wire them with **Connect**, tune each
+link's capacity / buffer / delay / loss, add traffic flows (Tahoe or Reno from
+one host to another), then press **Run on this network**.
+
+```bash
+pip install -r requirements.txt
+python topology_app.py          # open http://127.0.0.1:5000
+```
+
+- `network_sim.py` routes each flow over the lowest-delay path, runs AIMD on it,
+  lets flows share (and fight over) link queues, and reports which link dropped.
+- Links light up green→red with queue fill during playback; red bursts are drops.
+- The existing causal agent explains every NOT GOOD round per flow.
+- Topologies can be saved/loaded as JSON; the editor autosaves in the browser.
