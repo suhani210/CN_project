@@ -106,7 +106,7 @@
     <div id="playback" style="display:none">
       <h3>Playback</h3>
       <div class="row"><button id="bPlay">&#9654;</button><input id="slider" type="range" min="1" max="60" value="1" style="flex:1"><span id="rl">1</span></div>
-      <p class="hint">Link colour = queue fill (green &rarr; red). Dots = packets (one colour per flow); a red &#10005; is a packet dropped at that link; a dashed orange ring is the formula forecasting a drop there next.</p>
+      <p class="hint">Link colour = queue fill (green &rarr; red). Dots = packets (one colour per flow); a red &#10005; is a packet dropped at that link; a dashed orange ring (below a link) is the formula forecasting drops there in the NEXT round; the banner at the top-left of the canvas lists them.</p>
     </div>
   </aside>
 </main>
@@ -144,6 +144,13 @@ function queueColor(f) { // 0 = green, 1 = red
   const h = 140 - 140 * Math.min(1, f);
   return `hsl(${h} 70% 45%)`;
 }
+// forecast made at the end of this round for the NEXT round (stored with next round's log entry)
+function nextForecast(l) {
+  const nx = result.links[round];
+  if (!nx) return 0;
+  const a = nx[l.id + ":ab"], b = nx[l.id + ":ba"];
+  return Math.max(a ? a.predicted : 0, b ? b.predicted : 0);
+}
 function linkState(l) {
   if (!result || !result.links[round-1]) return null;
   const rl = result.links[round-1];
@@ -151,11 +158,12 @@ function linkState(l) {
   if (!a && !b) return {queue:0, dropped:0, used:false};
   const q = Math.max(a ? a.queue : 0, b ? b.queue : 0);
   return {queue:q, dropped:(a?a.dropped:0)+(b?b.dropped:0), used:true,
-          predicted:Math.max(a?a.predicted:0, b?b.predicted:0)};
+          next:nextForecast(l)};
 }
 function draw() {
   const svg = $("canvas");
   svg.innerHTML = "";
+  const forecasts = [];
   const gl = el("g", {}, svg), gn = el("g", {}, svg), gp = el("g", {}, svg);
   for (const l of topo.links) {
     const a = nodeById(l.a), b = nodeById(l.b);
@@ -166,10 +174,12 @@ function draw() {
     const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
     const t = el("text", {x:mx, y:my-7, class:"linklabel"}, gl);
     t.textContent = `${l.capacity} pkt/r · buf ${l.buffer} · ${l.delay}ms` + (l.loss ? ` · ${(l.loss*100).toFixed(1)}%` : "");
-    if (st && st.predicted >= 0.5 && st.dropped === 0) {
-      el("circle", {cx:mx, cy:my, r:12, fill:"none", stroke:"#f4a261", "stroke-width":2.5, "stroke-dasharray":"4 3"}, gp);
-      const w = el("text", {x:mx, y:my+4, class:"linklabel", style:"fill:#f4a261;font-weight:700"}, gp);
-      w.textContent = "~" + Math.round(st.predicted);
+    if (st && st.next >= 0.5) {
+      el("circle", {cx:mx, cy:my + 22, r:13, fill:"rgba(244,162,97,.15)", stroke:"#f4a261", "stroke-width":2.5, "stroke-dasharray":"4 3"}, gp);
+      const w = el("text", {x:mx, y:my + 26, class:"linklabel", style:"fill:#f4a261;font-weight:700"}, gp);
+      w.textContent = "~" + Math.round(st.next);
+      const nm = `${a.name} ↔ ${b.name}`;
+      forecasts.push(`${nm}: ~${Math.round(st.next)} pkts`);
     }
     if (st && st.dropped > 0) {
       el("circle", {cx:mx, cy:my, r:10 + st.dropped, fill:"rgba(230,57,70,.35)", stroke:"#e63946"}, gp);
@@ -182,6 +192,11 @@ function draw() {
       transform:`translate(${n.x},${n.y})`, "data-id":n.id}, gn);
     g.innerHTML = ICON[n.type] + `<text y="34">${n.name.replace(/</g,"&lt;")}</text>`;
     g.style.cursor = tool === "select" ? "move" : "pointer";
+  }
+  if (result) {
+    const bx = svg.viewBox.baseVal, x = bx && bx.width ? bx.x + 14 : 14, y = bx && bx.width ? bx.y + 44 : 44;
+    const t = el("text", {x, y, "font-size":12, "font-weight":700, fill: forecasts.length ? "#f4a261" : "currentColor", opacity: forecasts.length ? 1 : .5}, gp);
+    t.textContent = forecasts.length ? "⚠ Forecast: loss expected NEXT round at " + forecasts.join("; ") : "Forecast: no loss expected next round";
   }
   fitView();
   renderProps(); renderFlows();
