@@ -125,6 +125,9 @@ def simulate(topology, rounds=60, seed=42):
     rng = random.Random(seed)
 
     flows = [_Flow(s, find_path(nodes, links, s["src"], s["dst"]), names) for s in flow_specs]
+    for f in flows:
+        if f.start > rounds:
+            raise TopologyError(f"flow {f.label} starts at round {f.start}, after the {rounds}-round run ends")
     tick = max(f.base_rtt for f in flows) or 0.1  # one round ~ the longest RTT
     queues = {}  # (link id, direction) -> packets queued
     for f in flows:
