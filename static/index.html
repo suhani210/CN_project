@@ -428,6 +428,7 @@ $("bRun").onclick = async () => {
     const j = await r.json();
     if (!r.ok) { box.innerHTML = `<span class="err">${j.error}</span>`; return; }
     result = j; showResults(); startAnim();
+    playing = true; $("bPlay").innerHTML = "&#10074;&#10074;"; // auto-play from round 1
   } catch (e) { box.innerHTML = `<span class="err">Could not reach the server (${e.message}). Start it with: python topology_app.py</span>`; }
 };
 const COLORS = ["#e76f51","#2a9d8f","#1f6feb","#9b5de5","#f4a261","#43aa8b"];
@@ -505,7 +506,7 @@ function packetFrame(now) {
   if (!g) g = el("g", {id:"pk"}, $("canvas"));
   g.innerHTML = "";
   const rc = el("text", {x:14, y:22, "font-size":13, "font-weight":700, fill:"currentColor", opacity:.7}, g);
-  rc.textContent = "Round " + round + " / " + result.links.length;
+  rc.textContent = "Round " + round + " / " + result.links.length + (playing ? "" : "  (paused: replaying this round, press ▶ to advance)");
   const waiting = {};
   result.flows.forEach((f, fi) => {
     const rd = f.rounds[round - f.rounds[0].round];
