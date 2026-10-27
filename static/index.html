@@ -504,9 +504,21 @@ function packetFrame(now) {
   let g = document.getElementById("pk");
   if (!g) g = el("g", {id:"pk"}, $("canvas"));
   g.innerHTML = "";
+  const rc = el("text", {x:14, y:22, "font-size":13, "font-weight":700, fill:"currentColor", opacity:.7}, g);
+  rc.textContent = "Round " + round + " / " + result.links.length;
+  const waiting = {};
   result.flows.forEach((f, fi) => {
     const rd = f.rounds[round - f.rounds[0].round];
-    if (!rd) return;
+    if (!rd) {
+      const src = nodeById(f.path_nodes[0]);
+      if (src && round < f.rounds[0].round) {
+        const n = waiting[src.id] = (waiting[src.id] || 0) + 1;
+        const t = el("text", {x:src.x, y:src.y - 26 - (n-1)*14, "text-anchor":"middle", "font-size":11, "font-weight":700,
+          fill:COLORS[fi % 6], opacity:.6 + .4 * Math.abs(Math.sin(phase * Math.PI))}, g);
+        t.textContent = "⏸ waiting · starts at round " + f.rounds[0].round;
+      }
+      return;
+    }
     const pts = f.path_nodes.map(nodeById);
     if (pts.some(p => !p)) return;
     const H = pts.length - 1, N = Math.min(rd.sent, 12), lane = (fi - (result.flows.length-1)/2) * 6;
