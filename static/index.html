@@ -67,7 +67,16 @@
   <button id="tLink" title="Click two devices to connect them">Connect</button>
   <button id="tDelete" title="Click a device or link to delete it">Delete</button>
   <span style="flex:1"></span>
-  <button id="bSample">Sample topology</button>
+  <select id="bSample" title="Load a ready-made topology">
+    <option value="">Sample topologies…</option>
+    <option value="simple">1. Simple client – router – server</option>
+    <option value="dumbbell">2. Dumbbell (shared bottleneck)</option>
+    <option value="star">3. Star LAN (4 PCs + switch)</option>
+    <option value="mesh">4. Router mesh (redundant paths)</option>
+    <option value="lossy">5. Lossy link (random loss)</option>
+    <option value="bloat">6. Bufferbloat (huge buffer)</option>
+  </select>
+  <button id="bToggle" style="display:none">Hide results</button>
   <button id="bClear">Clear</button>
   <button id="bSave">Save</button>
   <button id="bLoad">Load</button>
@@ -174,7 +183,18 @@ function draw() {
     g.innerHTML = ICON[n.type] + `<text y="34">${n.name.replace(/</g,"&lt;")}</text>`;
     g.style.cursor = tool === "select" ? "move" : "pointer";
   }
+  fitView();
   renderProps(); renderFlows();
+}
+// when the results panel is open the canvas shrinks: scale the topology to stay fully visible
+function fitView() {
+  const svg = $("canvas"), showing = result && $("results").style.display !== "none";
+  svg.removeAttribute("viewBox");
+  if (!showing || !topo.nodes.length) return;
+  const xs = topo.nodes.map(n => n.x), ys = topo.nodes.map(n => n.y);
+  const x0 = Math.min(...xs) - 70, y0 = Math.min(...ys) - 50, x1 = Math.max(...xs) + 70, y1 = Math.max(...ys) + 60;
+  if (x1 - x0 <= svg.clientWidth && y1 - y0 <= svg.clientHeight && x0 >= 0 && y0 >= 0) return;
+  svg.setAttribute("viewBox", `${x0} ${y0} ${x1-x0} ${y1-y0}`);
 }
 
 /* ---------- drag & drop from palette ---------- */
@@ -193,8 +213,10 @@ canvas.addEventListener("drop", e => {
   topo.nodes.push(n); sel = n; save(); draw();
 });
 function pt(e) {
-  const r = canvas.getBoundingClientRect();
-  return {x:Math.round(e.clientX - r.left), y:Math.round(e.clientY - r.top)};
+  const m = canvas.getScreenCTM();
+  if (!m) { const r = canvas.getBoundingClientRect(); return {x:Math.round(e.clientX-r.left), y:Math.round(e.clientY-r.top)}; }
+  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+  return {x:Math.round(p.x), y:Math.round(p.y)};
 }
 
 /* ---------- pick up / move / connect / delete ---------- */
@@ -227,8 +249,8 @@ canvas.addEventListener("pointerdown", e => {
 canvas.addEventListener("pointermove", e => {
   if (!drag) return;
   const p = pt(e), r = canvas.getBoundingClientRect();
-  drag.n.x = Math.max(25, Math.min(r.width-25, p.x + drag.dx));
-  drag.n.y = Math.max(25, Math.min(r.height-30, p.y + drag.dy));
+  drag.n.x = Math.max(25, p.x + drag.dx);
+  drag.n.y = Math.max(25, p.y + drag.dy);
   draw();
 });
 canvas.addEventListener("pointerup", () => { if (drag) { drag = null; save(); } });
@@ -317,20 +339,65 @@ $("bAddFlow").onclick = () => {
 };
 
 /* ---------- toolbar actions ---------- */
-function sample() {
-  uid = 1; const N = (type, name, x, y) => ({id:nid(), type, name, x, y});
-  const pc1 = N("host","PC1",90,90), pc2 = N("host","PC2",90,250), pc3 = N("host","PC3",90,410);
-  const sw = N("switch","Switch1",250,250), r1 = N("router","Router1",430,250), r2 = N("router","Router2",610,250);
-  const srv = N("server","WebServer",780,250);
-  topo = {nodes:[pc1,pc2,pc3,sw,r1,r2,srv], links:[], flows:[]};
+const SAMPLES = {
+  simple(N, L, F) {
+    const pc = N("host","PC1",120,200), r = N("router","Router1",360,200), srv = N("server","Server1",600,200);
+    L(pc,r,20,15,10); L(r,srv,20,15,10); F(pc,srv,"reno"); return [pc,r,srv];
+  },
+  dumbbell(N, L, F) {
+    const pc1 = N("host","PC1",90,70), pc2 = N("host","PC2",90,210), pc3 = N("host","PC3",90,350);
+    const sw = N("switch","Switch1",250,210), r1 = N("router","Router1",430,210), r2 = N("router","Router2",610,210);
+    const srv = N("server","WebServer",780,210);
+    L(pc1,sw,40,30,2); L(pc2,sw,40,30,2); L(pc3,sw,40,30,2);
+    L(sw,r1,60,30,3); L(r1,r2,24,12,20); L(r2,srv,60,30,3);
+    F(pc1,srv,"reno",1); F(pc2,srv,"tahoe",1); F(pc3,srv,"reno",15);
+    return [pc1,pc2,pc3,sw,r1,r2,srv];
+  },
+  star(N, L, F) {
+    const srv = N("server","Server1",700,200), r = N("router","Router1",520,200), sw = N("switch","Switch1",340,200);
+    const pcs = [60,150,250,340].map((y,i) => N("host","PC"+(i+1),130,y-60));
+    L(r,srv,30,15,5); L(sw,r,50,25,3);
+    pcs.forEach(p => L(p,sw,25,15,2));
+    pcs.forEach((p,i) => F(p,srv,i%2 ? "tahoe" : "reno",1+i*3));
+    return [srv,r,sw,...pcs];
+  },
+  mesh(N, L, F) {
+    const pc = N("host","PC1",90,200), a = N("router","RouterA",290,200);
+    const b = N("router","RouterB",470,80), c = N("router","RouterC",470,320), srv = N("server","Server1",680,200);
+    L(pc,a,40,20,2); L(a,b,20,10,5); L(b,srv,20,10,5); L(a,c,20,10,30); L(c,srv,20,10,30); L(b,c,15,8,5);
+    const pc2 = N("host","PC2",90,340); L(pc2,a,40,20,2);
+    F(pc,srv,"reno"); F(pc2,srv,"tahoe",8);
+    return [pc,pc2,a,b,c,srv];
+  },
+  lossy(N, L, F) {
+    const pc1 = N("host","PC1",110,120), pc2 = N("host","PC2",110,290), r = N("router","Router1",340,200), srv = N("server","Server1",600,200);
+    L(pc1,r,40,20,5); L(pc2,r,40,20,5);
+    topo.links.push({id:lid(), a:r.id, b:srv.id, capacity:30, buffer:15, delay:15, loss:0.04});
+    F(pc1,srv,"reno"); F(pc2,srv,"tahoe");
+    return [pc1,pc2,r,srv];
+  },
+  bloat(N, L, F) {
+    const pc1 = N("host","PC1",110,120), pc2 = N("host","PC2",110,290), r = N("router","Router1",340,200), srv = N("server","Server1",600,200);
+    L(pc1,r,40,20,5); L(pc2,r,40,20,5); L(r,srv,15,150,10);
+    F(pc1,srv,"reno"); F(pc2,srv,"reno",5);
+    return [pc1,pc2,r,srv];
+  },
+};
+function sample(kind) {
+  uid = 1; topo = {nodes:[], links:[], flows:[]};
+  const N = (type, name, x, y) => ({id:nid(), type, name, x, y});
   const L = (a,b,c,bf,d) => topo.links.push({id:lid(), a:a.id, b:b.id, capacity:c, buffer:bf, delay:d, loss:0});
-  L(pc1,sw,40,30,2); L(pc2,sw,40,30,2); L(pc3,sw,40,30,2);
-  L(sw,r1,60,30,3); L(r1,r2,24,12,20); L(r2,srv,60,30,3);
-  const F = (s,a,start) => topo.flows.push({id:fid(), src:s.id, dst:srv.id, algorithm:a, start});
-  F(pc1,"reno",1); F(pc2,"tahoe",1); F(pc3,"reno",15);
+  const F = (s,d,a,start=1) => topo.flows.push({id:fid(), src:s.id, dst:d.id, algorithm:a, start});
+  topo.nodes = SAMPLES[kind || "dumbbell"](N, L, F);
   sel = null; clearResult(); save(); draw();
 }
-$("bSample").onclick = sample;
+$("bSample").onchange = e => { if (e.target.value) sample(e.target.value); e.target.value = ""; };
+$("bToggle").onclick = () => {
+  const r = $("results"), hide = r.style.display !== "none";
+  r.style.display = hide ? "none" : "block";
+  $("bToggle").textContent = hide ? "Show results" : "Hide results";
+  draw();
+};
 $("bClear").onclick = () => { if (!topo.nodes.length || confirm("Clear the whole topology?")) { topo = {nodes:[],links:[],flows:[]}; sel=null; clearResult(); save(); draw(); } };
 $("bSave").onclick = () => {
   const a = document.createElement("a");
@@ -350,10 +417,11 @@ $("fLoad").onchange = async e => {
 };
 
 /* ---------- run + results ---------- */
-function clearResult() { result = null; stop(); $("results").style.display = "none"; $("playback").style.display = "none"; }
+function clearResult() { result = null; $("bToggle").style.display = "none"; $("bToggle").textContent = "Hide results"; stop(); $("results").style.display = "none"; $("playback").style.display = "none"; }
 $("bRun").onclick = async () => {
   const box = $("results");
   box.style.display = "block"; box.innerHTML = "Simulating…";
+  $("bToggle").style.display = ""; $("bToggle").textContent = "Hide results";
   try {
     const r = await fetch("/api/simulate", {method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify({topology:topo, rounds:+$("rounds").value || 60})});
@@ -495,7 +563,7 @@ $("bPlay").onclick = () => {
   $("bPlay").innerHTML = "&#10074;&#10074;";
 };
 
-if (!load() || !topo.nodes.length) sample(); else draw();
+if (!load() || !topo.nodes.length) sample("dumbbell"); else draw();
 window.addEventListener("resize", () => { if (result) showResults(); });
 </script>
 </body>
